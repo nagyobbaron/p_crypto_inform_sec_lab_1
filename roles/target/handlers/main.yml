@@ -1,0 +1,13 @@
+---
+- name: Restart target lab services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    daemon_reload: true
+    state: restarted
+  loop:
+    - soc-overflow.service
+    - soc-artifact.service
+    - soc-tls@4433.service
+    - soc-tls@4434.service
+    - soc-tls@4435.service
+    - soc-tls@4436.service

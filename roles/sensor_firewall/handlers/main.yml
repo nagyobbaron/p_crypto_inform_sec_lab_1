@@ -1,0 +1,4 @@
+---
+- name: Apply sensor nftables policy
+  ansible.builtin.command: nft --file /etc/nftables.conf
+  changed_when: true

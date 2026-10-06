@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+port="$1"
+base=/opt/soc-lab/tls
+case "$port" in
+  4433) exec openssl s_server -accept "$port" -cert "$base/valid.crt" -key "$base/valid.key" -www -tls1 -cipher 'DEFAULT:@SECLEVEL=0' ;;
+  4434) exec openssl s_server -accept "$port" -cert "$base/expired.crt" -key "$base/expired.key" -www -tls1_2 ;;
+  4435) exec openssl s_server -accept "$port" -cert "$base/rogue.crt" -key "$base/rogue.key" -www -tls1_2 ;;
+  4436) exec openssl s_server -accept "$port" -cert "$base/valid.crt" -key "$base/valid.key" -www -tls1_2 -cipher 'AES128-SHA:@SECLEVEL=0' ;;
+  *) exit 64 ;;
+esac
+

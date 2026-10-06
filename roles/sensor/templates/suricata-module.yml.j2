@@ -1,0 +1,7 @@
+- module: suricata
+  eve:
+    enabled: true
+    var.paths: [/var/log/suricata/eve.json]
+    var.internal_networks: [10.20.20.0/24]
+    var.tags: [suricata, forwarded, soc-lab]
+

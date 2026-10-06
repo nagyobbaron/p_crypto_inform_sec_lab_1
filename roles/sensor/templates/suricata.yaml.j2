@@ -1,0 +1,73 @@
+%YAML 1.1
+---
+vars:
+  address-groups:
+    HOME_NET: "[10.20.20.0/24]"
+    EXTERNAL_NET: "[10.10.10.0/24]"
+  port-groups:
+    HTTP_PORTS: "80,8080"
+
+default-log-dir: /var/log/suricata
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - soc-lab.rules
+
+host-mode: router
+runmode: workers
+pid-file: /run/suricata.pid
+
+af-packet:
+  - interface: {{ suricata_capture_interface }}
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    tpacket-v3: yes
+
+app-layer:
+  protocols:
+    http:
+      enabled: yes
+    tls:
+      enabled: yes
+      ja3-fingerprints: yes
+      ja4-fingerprints: yes
+
+stream:
+  memcap: 128mb
+  checksum-validation: yes
+  reassembly:
+    memcap: 256mb
+    depth: 1mb
+
+outputs:
+  - fast:
+      enabled: no
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      rotate-interval: day
+      types:
+        - alert:
+            tagged-packets: yes
+        - http:
+            extended: yes
+        - tls:
+            custom: [subject, issuer, serial, fingerprint, sni, version, not_before, not_after, ja3, ja3s, ja4, client_handshake, server_handshake]
+        - files:
+            force-hash: [sha256]
+        - flow
+        - stats:
+            totals: yes
+            threads: no
+
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: no
+    - syslog:
+        enabled: yes
+        facility: local5
+

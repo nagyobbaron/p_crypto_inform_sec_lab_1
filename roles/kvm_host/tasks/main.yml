@@ -1,0 +1,63 @@
+---
+- name: Require safe image checksums and SSH key
+  ansible.builtin.assert:
+    that:
+      - ubuntu_image_sha256 is match('^[0-9a-fA-F]{64}$')
+      - kali_image_sha256 is match('^[0-9a-fA-F]{64}$')
+      - soc_ssh_public_key.startswith('ssh-')
+
+- name: Install KVM and cloud-image tooling
+  ansible.builtin.apt:
+    name:
+      - qemu-system-x86
+      - qemu-utils
+      - libvirt-daemon-system
+      - libvirt-clients
+      - virtinst
+      - cloud-image-utils
+      - python3-libvirt
+      - python3-lxml
+      - nftables
+    state: present
+    update_cache: true
+
+- name: Enable libvirt
+  ansible.builtin.systemd_service:
+    name: libvirtd
+    enabled: true
+    state: started
+
+- name: Create dedicated SOC storage directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: libvirt-qemu
+    group: libvirt-qemu
+    mode: '0750'
+  loop:
+    - "{{ soc_storage_pool }}"
+    - "{{ soc_seed_dir }}"
+    - "{{ soc_image_dir }}"
+
+- name: Read defined libvirt networks
+  community.libvirt.virt_net:
+    command: list_nets
+  register: kvm_host_existing_networks
+  changed_when: false
+
+- name: Define missing SOC networks
+  community.libvirt.virt_net:
+    command: define
+    name: "{{ item.value.name }}"
+    xml: "{{ lookup('template', 'network.xml.j2') }}"
+  vars:
+    network_item: "{{ item }}"
+  loop: "{{ soc_networks | dict2items }}"
+  when: item.value.name not in kvm_host_existing_networks.list_nets
+
+- name: Start and autostart SOC networks
+  community.libvirt.virt_net:
+    name: "{{ item.value.name }}"
+    state: active
+    autostart: true
+  loop: "{{ soc_networks | dict2items }}"

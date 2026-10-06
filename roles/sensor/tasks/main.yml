@@ -1,0 +1,141 @@
+---
+- name: Enable IPv4 forwarding persistently
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    sysctl_set: true
+    reload: true
+
+- name: Install repository and crypto tooling
+  ansible.builtin.apt:
+    name: [software-properties-common, ca-certificates, curl, gnupg, nftables]
+    state: present
+    update_cache: true
+
+- name: Enable the stable OISF Suricata repository
+  ansible.builtin.apt_repository:
+    repo: ppa:oisf/suricata-stable
+    state: present
+    update_cache: true
+
+- name: Install Suricata
+  ansible.builtin.apt:
+    name: suricata
+    state: present
+
+- name: Download the Elastic signing key
+  ansible.builtin.get_url:
+    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    dest: /usr/share/keyrings/elastic.asc
+    mode: '0644'
+
+- name: Convert Elastic signing key to a keyring
+  ansible.builtin.command:
+    cmd: gpg --dearmor --yes --output /usr/share/keyrings/elastic.gpg /usr/share/keyrings/elastic.asc
+    creates: /usr/share/keyrings/elastic.gpg
+
+- name: Configure the Elastic 9.x apt repository
+  ansible.builtin.apt_repository:
+    repo: deb [signed-by=/usr/share/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/9.x/apt stable main
+    filename: elastic-9.x
+    state: present
+    update_cache: true
+
+- name: Install the exact Filebeat cluster version
+  ansible.builtin.apt:
+    name: "filebeat={{ elastic_version }}"
+    state: present
+    allow_downgrade: false
+
+- name: Create Suricata rule and log directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /etc/suricata/rules, owner: root, group: root, mode: '0755'}
+    - {path: /var/log/suricata, owner: suricata, group: suricata, mode: '0750'}
+    - {path: /etc/filebeat/certs, owner: root, group: root, mode: '0750'}
+
+- name: Install Suricata configuration and lab rules
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - {src: suricata.yaml.j2, dest: /etc/suricata/suricata.yaml}
+    - {src: local.rules.j2, dest: /etc/suricata/rules/soc-lab.rules}
+  notify: Restart Suricata
+
+- name: Install the known SHA-256 list
+  ansible.builtin.copy:
+    dest: /etc/suricata/rules/soc-lab-sha256.list
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      9c797825c8cbd8e7e07382f4bb61228701a481f108542dbcf025cdc726284f2f
+  notify: Restart Suricata
+
+- name: Validate Suricata configuration before service changes
+  ansible.builtin.command: suricata -T -c /etc/suricata/suricata.yaml
+  changed_when: false
+
+- name: Copy Elastic CA certificate
+  ansible.builtin.copy:
+    src: "{{ elastic_ca_file_local }}"
+    dest: "{{ elastic_ca_file_remote }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Filebeat
+
+- name: Configure Filebeat and its Suricata module
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0600'
+  loop:
+    - {src: filebeat.yml.j2, dest: /etc/filebeat/filebeat.yml}
+    - {src: suricata-module.yml.j2, dest: /etc/filebeat/modules.d/suricata.yml}
+  notify: Restart Filebeat
+
+- name: Check for an existing Filebeat keystore
+  ansible.builtin.stat:
+    path: /var/lib/filebeat/filebeat.keystore
+  register: sensor_filebeat_keystore
+
+- name: Create Filebeat keystore once
+  ansible.builtin.command: filebeat keystore create
+  when: not sensor_filebeat_keystore.stat.exists
+  changed_when: true
+
+- name: Store publishing key in the Filebeat keystore
+  ansible.builtin.command:
+    cmd: filebeat keystore add ES_API_KEY --stdin --force
+    stdin: "{{ elastic_api_key }}"
+  changed_when: false
+  no_log: true
+
+- name: Test Filebeat configuration
+  ansible.builtin.command: filebeat test config -e
+  changed_when: false
+  no_log: true
+
+- name: Configure sensor firewall
+  ansible.builtin.include_role:
+    name: sensor_firewall
+
+- name: Enable sensor services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [suricata, filebeat]

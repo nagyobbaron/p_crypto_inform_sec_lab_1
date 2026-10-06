@@ -1,0 +1,122 @@
+---
+- name: Install target runtime packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+      - openssl
+      - python3
+      - python3-cryptography
+      - curl
+    state: present
+    update_cache: true
+
+- name: Enable Docker
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Create target lab directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /opt/soc-lab/dvwa
+    - /opt/soc-lab/tls
+    - /usr/local/lib/soc-lab
+    - /srv/soc-artifacts
+
+- name: Install target service definitions
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {src: compose.yml.j2, dest: /opt/soc-lab/dvwa/compose.yml, mode: '0600'}
+    - {src: generate-certs.py.j2, dest: /usr/local/lib/soc-lab/generate-certs.py, mode: '0750'}
+    - {src: tls-endpoint.sh.j2, dest: /usr/local/lib/soc-lab/tls-endpoint.sh, mode: '0750'}
+    - {src: overflow-service.py.j2, dest: /usr/local/lib/soc-lab/overflow-service.py, mode: '0750'}
+    - {src: soc-tls@.service.j2, dest: /etc/systemd/system/soc-tls@.service, mode: '0644'}
+    - {src: soc-overflow.service.j2, dest: /etc/systemd/system/soc-overflow.service, mode: '0644'}
+    - {src: soc-artifact.service.j2, dest: /etc/systemd/system/soc-artifact.service, mode: '0644'}
+  notify: Restart target lab services
+
+- name: Generate lab certificates once
+  ansible.builtin.command:
+    cmd: /usr/local/lib/soc-lab/generate-certs.py /opt/soc-lab/tls
+    creates: /opt/soc-lab/tls/rogue.crt
+  notify: Restart target lab services
+
+- name: Install deterministic known-hash artifact
+  ansible.builtin.copy:
+    dest: /srv/soc-artifacts/known.bin
+    owner: root
+    group: root
+    mode: '0644'
+    content: "SOC-LAB-KNOWN-ARTIFACT-v1\n"
+
+- name: Start DVWA stack
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: /opt/soc-lab/dvwa
+  register: target_compose_up
+  changed_when: "'Started' in target_compose_up.stdout or 'Created' in target_compose_up.stdout"
+
+- name: Wait for DVWA setup page
+  ansible.builtin.uri:
+    url: http://127.0.0.1/setup.php
+    status_code: 200
+  register: target_dvwa_ready
+  retries: 30
+  delay: 5
+  until: target_dvwa_ready.status == 200
+
+- name: Check whether DVWA was initialized
+  ansible.builtin.stat:
+    path: /opt/soc-lab/dvwa/.initialized
+  register: target_dvwa_initialized
+
+- name: Initialize or reset the DVWA database
+  ansible.builtin.uri:
+    url: http://127.0.0.1/setup.php
+    method: POST
+    body_format: form-urlencoded
+    body:
+      create_db: Create / Reset Database
+    status_code: 200
+  changed_when: false
+  when: not target_dvwa_initialized.stat.exists
+
+- name: Record successful DVWA initialization
+  ansible.builtin.file:
+    path: /opt/soc-lab/dvwa/.initialized
+    state: touch
+    owner: root
+    group: root
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+  when: not target_dvwa_initialized.stat.exists
+
+- name: Reload systemd for target services
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Enable controlled target services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - soc-overflow.service
+    - soc-artifact.service
+    - soc-tls@4433.service
+    - soc-tls@4434.service
+    - soc-tls@4435.service
+    - soc-tls@4436.service

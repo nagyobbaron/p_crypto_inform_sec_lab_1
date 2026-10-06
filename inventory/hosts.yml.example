@@ -1,0 +1,35 @@
+---
+all:
+  vars:
+    ansible_user: socadmin
+    ansible_ssh_private_key_file: "{{ lookup('env', 'SOC_SSH_PRIVATE_KEY') }}"
+  children:
+    kvm_hosts:
+      hosts:
+        kvm_host:
+          ansible_host: 203.0.113.10
+    sensors:
+      hosts:
+        sensor:
+          ansible_host: 10.20.20.1
+          ansible_user: soc
+          ansible_ssh_common_args: >-
+            -o ProxyJump=socadmin@203.0.113.10
+            -o StrictHostKeyChecking=accept-new
+    targets:
+      hosts:
+        target:
+          ansible_host: 10.20.20.20
+          ansible_user: soc
+          ansible_ssh_common_args: >-
+            -o ProxyJump=socadmin@203.0.113.10
+            -o StrictHostKeyChecking=accept-new
+    attackers:
+      hosts:
+        attacker:
+          ansible_host: 10.10.10.10
+          ansible_user: soc
+          ansible_ssh_common_args: >-
+            -o ProxyJump=socadmin@203.0.113.10
+            -o StrictHostKeyChecking=accept-new
+

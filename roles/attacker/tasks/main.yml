@@ -1,0 +1,14 @@
+---
+- name: Install attack-harness dependencies
+  ansible.builtin.apt:
+    name: [curl, openssl, python3, ca-certificates]
+    state: present
+    update_cache: true
+
+- name: Install deterministic attack harness
+  ansible.builtin.template:
+    src: soc-attack.sh.j2
+    dest: /usr/local/bin/soc-attack
+    owner: root
+    group: root
+    mode: '0755'

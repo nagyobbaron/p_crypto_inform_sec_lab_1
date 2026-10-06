@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+import logging
+import socketserver
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
+class Handler(socketserver.BaseRequestHandler):
+    def handle(self):
+        data = self.request.recv(8192)
+        logging.info("received controlled input bytes=%d from=%s", len(data), self.client_address[0])
+        self.request.sendall(b"recorded\n")
+
+with socketserver.TCPServer(("10.20.20.20", 9999), Handler) as server:
+    server.serve_forever()
+

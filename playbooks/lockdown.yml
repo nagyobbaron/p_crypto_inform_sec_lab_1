@@ -1,0 +1,9 @@
+---
+- name: Disable general lab Internet egress
+  hosts: sensors
+  become: true
+  gather_facts: false
+  vars:
+    soc_lab_allow_egress: false
+  roles:
+    - sensor_firewall

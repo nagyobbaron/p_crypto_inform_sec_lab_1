@@ -1,0 +1,25 @@
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: soc-lab-root
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: dvwa
+    volumes:
+      - dvwa-db:/var/lib/mysql
+  dvwa:
+    image: {{ dvwa_image }}
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      DB_SERVER: db
+      DB_DATABASE: dvwa
+      DB_USER: dvwa
+      DB_PASSWORD: dvwa
+    ports:
+      - "10.20.20.20:80:80"
+volumes:
+  dvwa-db: {}
+

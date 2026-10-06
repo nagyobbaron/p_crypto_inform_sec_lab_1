@@ -1,0 +1,14 @@
+{% set net = network_item.value %}
+<network>
+  <name>{{ net.name }}</name>
+  <bridge name="{{ net.bridge }}" stp="on" delay="0"/>
+{% if net.forward_mode == 'nat' %}
+  <forward mode="nat"/>
+{% endif %}
+  <ip address="{{ net.gateway }}" netmask="{{ net.netmask }}">
+{% if net.dhcp_start is defined %}
+    <dhcp><range start="{{ net.dhcp_start }}" end="{{ net.dhcp_end }}"/></dhcp>
+{% endif %}
+  </ip>
+</network>
+

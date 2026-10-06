@@ -1,0 +1,51 @@
+---
+- name: Configure the dedicated KVM host
+  hosts: kvm_hosts
+  become: true
+  gather_facts: true
+  roles:
+    - kvm_host
+    - vm_factory
+
+- name: Wait for guest SSH through the KVM host
+  hosts: sensors:targets:attackers
+  gather_facts: false
+  tasks:
+    - name: Wait until the guest accepts SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+
+- name: Configure the Suricata sensor and temporary provisioning egress
+  hosts: sensors
+  become: true
+  vars:
+    soc_lab_allow_egress: true
+  roles:
+    - sensor
+
+- name: Configure the intentionally vulnerable target
+  hosts: targets
+  become: true
+  roles:
+    - target
+
+- name: Configure the attack generator
+  hosts: attackers
+  become: true
+  roles:
+    - attacker
+
+- name: Remove general guest egress after provisioning
+  hosts: sensors
+  become: true
+  vars:
+    soc_lab_allow_egress: false
+  roles:
+    - sensor_firewall
+
+- name: Load Elastic ingest and Kibana assets
+  hosts: sensors
+  become: true
+  gather_facts: false
+  roles:
+    - elastic_assets

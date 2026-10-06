@@ -1,0 +1,74 @@
+---
+soc_domain_prefix: soc
+soc_admin_user: soc
+soc_ssh_public_key: "{{ lookup('file', lookup('env', 'SOC_SSH_PUBLIC_KEY_FILE')) }}"
+
+soc_storage_pool: /var/lib/libvirt/images/soc-lab
+soc_seed_dir: /var/lib/libvirt/images/soc-lab/seeds
+soc_image_dir: /var/lib/libvirt/images/soc-lab/base
+
+soc_networks:
+  management:
+    name: soc-management
+    bridge: virbr-soc-m
+    gateway: 192.168.250.1
+    netmask: 255.255.255.0
+    dhcp_start: 192.168.250.100
+    dhcp_end: 192.168.250.200
+    forward_mode: nat
+  attacker:
+    name: soc-attacker
+    bridge: virbr-soc-a
+    gateway: 10.10.10.254
+    netmask: 255.255.255.0
+    forward_mode: none
+  target:
+    name: soc-target
+    bridge: virbr-soc-t
+    gateway: 10.20.20.254
+    netmask: 255.255.255.0
+    forward_mode: none
+
+ubuntu_image_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+ubuntu_image_sha256: CHANGE_ME_TO_PUBLISHED_UBUNTU_SHA256
+kali_image_url: CHANGE_ME_TO_PINNED_KALI_QCOW2_URL
+kali_image_sha256: CHANGE_ME_TO_PUBLISHED_KALI_SHA256
+
+soc_vms:
+  - name: soc-sensor
+    base_image: ubuntu
+    vcpus: 4
+    memory_mb: 6144
+    disk_gb: 30
+    interfaces:
+      - { network: soc-management, mac: "52:54:00:00:00:01" }
+      - { network: soc-attacker, mac: "52:54:00:10:00:01" }
+      - { network: soc-target, mac: "52:54:00:20:00:01" }
+  - name: soc-target
+    base_image: ubuntu
+    vcpus: 2
+    memory_mb: 4096
+    disk_gb: 30
+    interfaces:
+      - { network: soc-target, mac: "52:54:00:20:00:20" }
+  - name: soc-attacker
+    base_image: kali
+    vcpus: 2
+    memory_mb: 4096
+    disk_gb: 30
+    interfaces:
+      - { network: soc-attacker, mac: "52:54:00:10:00:10" }
+
+elasticsearch_url: "{{ lookup('env', 'ELASTICSEARCH_URL') }}"
+kibana_url: "{{ lookup('env', 'KIBANA_URL') }}"
+elastic_api_key: "{{ lookup('env', 'ELASTIC_API_KEY') }}"
+elastic_setup_api_key: "{{ lookup('env', 'ELASTIC_SETUP_API_KEY') }}"
+kibana_api_key: "{{ lookup('env', 'KIBANA_API_KEY') }}"
+elastic_version: "{{ lookup('env', 'ELASTIC_VERSION') }}"
+expected_egress_ip: "{{ lookup('env', 'SOC_EXPECTED_EGRESS_IP') }}"
+elastic_ca_file_local: "{{ lookup('env', 'ELASTIC_CA_FILE') }}"
+elastic_ca_file_remote: /etc/filebeat/certs/elastic-ca.pem
+
+suricata_capture_interface: soctgt
+soc_lab_allow_egress: true
+dvwa_image: ghcr.io/digininja/dvwa:latest

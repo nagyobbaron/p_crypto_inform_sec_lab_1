@@ -1,0 +1,15 @@
+[Unit]
+Description=Safe SOC lab oversized-input recorder
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/lib/soc-lab/overflow-service.py
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+

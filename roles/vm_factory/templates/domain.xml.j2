@@ -1,0 +1,37 @@
+<domain type="kvm">
+  <name>{{ vm.name }}</name>
+  <memory unit="MiB">{{ vm.memory_mb }}</memory>
+  <vcpu placement="static">{{ vm.vcpus }}</vcpu>
+  <os><type arch="x86_64" machine="q35">hvm</type><boot dev="hd"/></os>
+  <features><acpi/><apic/></features>
+  <cpu mode="host-model" check="partial"/>
+  <clock offset="utc"/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2"/>
+      <source file="{{ soc_storage_pool }}/{{ vm.name }}.qcow2"/>
+      <target dev="vda" bus="virtio"/>
+    </disk>
+    <disk type="file" device="cdrom">
+      <driver name="qemu" type="raw"/>
+      <source file="{{ soc_seed_dir }}/{{ vm.name }}-seed.img"/>
+      <target dev="sda" bus="sata"/>
+      <readonly/>
+    </disk>
+{% for nic in vm.interfaces %}
+    <interface type="network">
+      <mac address="{{ nic.mac }}"/>
+      <source network="{{ nic.network }}"/>
+      <model type="virtio"/>
+    </interface>
+{% endfor %}
+    <serial type="pty"><target port="0"/></serial>
+    <console type="pty"><target type="serial" port="0"/></console>
+    <rng model="virtio"><backend model="random">/dev/urandom</backend></rng>
+  </devices>
+</domain>
+

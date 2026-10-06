@@ -1,0 +1,16 @@
+[Unit]
+Description=SOC lab TLS endpoint on port %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/lib/soc-lab/tls-endpoint.sh %i
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+

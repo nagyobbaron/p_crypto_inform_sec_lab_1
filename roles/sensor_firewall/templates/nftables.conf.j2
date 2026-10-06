@@ -1,0 +1,45 @@
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet soc_filter {
+  chain input {
+    type filter hook input priority filter; policy drop;
+    iifname "lo" accept
+    ct state established,related accept
+    ip protocol icmp accept
+    udp sport 67 udp dport 68 accept
+    iifname { "socatt", "soctgt" } tcp dport 22 accept
+  }
+
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+    ct state established,related accept
+    iifname "socatt" oifname "soctgt" ip daddr 10.20.20.20 tcp dport { 80, 8080, 9999, 4433-4436 } accept
+{% if soc_lab_allow_egress | bool %}
+    iifname { "socatt", "soctgt" } oifname "socmgt" udp dport { 53, 123 } accept
+    iifname { "socatt", "soctgt" } oifname "socmgt" tcp dport { 53, 80, 443 } accept
+{% endif %}
+  }
+
+  chain output {
+    type filter hook output priority filter; policy drop;
+    oifname "lo" accept
+    ct state established,related accept
+    udp sport 68 udp dport 67 accept
+    udp dport { 53, 123 } accept
+    tcp dport { 53, 443 } accept
+{% if soc_lab_allow_egress | bool %}
+    tcp dport 80 accept
+{% endif %}
+  }
+}
+
+table ip soc_nat {
+  chain postrouting {
+    type nat hook postrouting priority srcnat; policy accept;
+{% if soc_lab_allow_egress | bool %}
+    oifname "socmgt" ip saddr { 10.10.10.0/24, 10.20.20.0/24 } masquerade
+{% endif %}
+  }
+}
+

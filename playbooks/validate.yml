@@ -1,0 +1,97 @@
+---
+- name: Record EVE position before benign traffic
+  hosts: sensors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Count current EVE lines
+      ansible.builtin.shell: wc -l < /var/log/suricata/eve.json
+      args:
+        executable: /bin/bash
+      register: eve_start
+      changed_when: false
+
+- name: Run benign traffic
+  hosts: attackers
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Run benign baseline
+      ansible.builtin.command: /usr/local/bin/soc-attack baseline
+      changed_when: false
+
+- name: Require zero custom alerts from baseline
+  hosts: sensors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Inspect only EVE records created by baseline
+      ansible.builtin.shell: |
+        set -o pipefail
+        sleep 2
+        if tail -n +{{ hostvars[inventory_hostname].eve_start.stdout | int + 1 }} /var/log/suricata/eve.json \
+          | grep -Eq '"signature_id":100000[1-7]'; then
+          exit 1
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Run all deterministic lab scenarios
+  hosts: attackers
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Run complete attack harness
+      ansible.builtin.command: /usr/local/bin/soc-attack all
+      changed_when: false
+
+- name: Validate expected Suricata SIDs
+  hosts: sensors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for all seven custom signatures in EVE
+      ansible.builtin.shell: |
+        set -o pipefail
+        for sid in 1000001 1000002 1000003 1000004 1000005 1000006 1000007; do
+          grep -q '"signature_id":'"${sid}" /var/log/suricata/eve.json || exit 1
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      retries: 10
+      delay: 2
+      register: sid_validation
+      until: sid_validation.rc == 0
+    - name: Confirm Filebeat output is reachable
+      ansible.builtin.command: filebeat test output -e
+      changed_when: false
+      no_log: true
+    - name: Wait for all seven rule IDs in Elasticsearch
+      ansible.builtin.uri:
+        url: "{{ elasticsearch_url }}/filebeat-*/_search"
+        method: POST
+        headers:
+          Authorization: "ApiKey {{ elastic_setup_api_key | b64encode }}"
+          Content-Type: application/json
+        ca_path: "{{ elastic_ca_file_remote }}"
+        body_format: json
+        body:
+          size: 0
+          query:
+            bool:
+              filter:
+                - range:
+                    "@timestamp": {gte: now-5m}
+                - terms:
+                    rule.id: ['1000001', '1000002', '1000003', '1000004', '1000005', '1000006', '1000007']
+          aggs:
+            unique_rules:
+              cardinality: {field: rule.id}
+        status_code: 200
+      register: elastic_validation
+      retries: 10
+      delay: 2
+      until: elastic_validation.json.aggregations.unique_rules.value | int >= 7
+      no_log: true

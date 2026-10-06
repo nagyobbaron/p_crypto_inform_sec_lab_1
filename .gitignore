@@ -1,0 +1,8 @@
+.ansible/
+artifacts/
+inventory/hosts.yml
+*.retry
+*.key
+*.pem
+vault-password*
+

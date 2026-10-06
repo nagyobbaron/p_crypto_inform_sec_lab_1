@@ -1,0 +1,7 @@
+---
+- name: Load Filebeat pipelines and Kibana assets
+  hosts: sensors
+  become: true
+  gather_facts: false
+  roles:
+    - elastic_assets

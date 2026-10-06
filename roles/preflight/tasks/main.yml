@@ -1,0 +1,136 @@
+---
+- name: Validate required inputs and host profile
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Debian'
+      - ansible_distribution_major_version == '13'
+      - ansible_processor_vcpus | int >= 8
+      - ansible_memtotal_mb | int >= 15360
+      - elasticsearch_url | length > 0
+      - kibana_url | length > 0
+      - elastic_api_key | length > 0
+      - elastic_setup_api_key | length > 0
+      - kibana_api_key | length > 0
+      - elastic_version is match('^9\\.[0-9]+\\.[0-9]+$')
+      - expected_egress_ip | length > 0
+      - elastic_ca_file_local | length > 0
+      - ubuntu_image_sha256 is not search('CHANGE_ME')
+      - kali_image_sha256 is not search('CHANGE_ME')
+      - ubuntu_image_url is not search('CHANGE_ME')
+      - kali_image_url is not search('CHANGE_ME')
+    fail_msg: Review the required environment variables, image checksums, OS, and host resources.
+
+- name: Require at least 90 GiB free on the root filesystem
+  ansible.builtin.assert:
+    that: (ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | int) >= 96636764160
+
+- name: Detect CPU virtualization extensions
+  ansible.builtin.shell: set -o pipefail && grep -Ecm1 '(vmx|svm)' /proc/cpuinfo
+  args:
+    executable: /bin/bash
+  register: preflight_virtualization_extensions
+  changed_when: false
+  failed_when: preflight_virtualization_extensions.stdout | int < 1
+
+- name: Check KVM device availability
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: preflight_kvm_device
+
+- name: Require a usable KVM device
+  ansible.builtin.assert:
+    that: preflight_kvm_device.stat.exists
+    fail_msg: /dev/kvm is unavailable; enable hardware virtualization first.
+
+- name: Read current libvirt inventory when available
+  ansible.builtin.shell: |
+    if command -v virsh >/dev/null 2>&1; then
+      printf '%s\n' '[domains]'; virsh list --all --name
+      printf '%s\n' '[networks]'; virsh net-list --all --name
+    else
+      printf '%s\n' 'virsh not installed'
+    fi
+  args:
+    executable: /bin/bash
+  register: preflight_libvirt_inventory
+  changed_when: false
+
+- name: Read nftables ruleset without changing it
+  ansible.builtin.command: nft list ruleset
+  become: true
+  register: preflight_nft_ruleset
+  changed_when: false
+  failed_when: false
+
+- name: Read listening TCP sockets
+  ansible.builtin.command: ss -lntp
+  become: true
+  register: preflight_listening_sockets
+  changed_when: false
+
+- name: Discover public egress address
+  ansible.builtin.uri:
+    url: https://api.ipify.org
+    return_content: true
+    validate_certs: true
+  register: preflight_public_ip
+
+- name: Verify the allowlisted egress address
+  ansible.builtin.assert:
+    that: preflight_public_ip.content | trim == expected_egress_ip
+    fail_msg: "Observed egress IP does not match SOC_EXPECTED_EGRESS_IP."
+
+- name: Query Elasticsearch over verified TLS
+  ansible.builtin.uri:
+    url: "{{ elasticsearch_url }}/"
+    headers: {Authorization: "ApiKey {{ elastic_api_key | b64encode }}"}
+    ca_path: "{{ elastic_ca_file_local }}"
+    return_content: true
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: preflight_elastic_info
+  no_log: true
+
+- name: Verify exact Elasticsearch version
+  ansible.builtin.assert:
+    that:
+      - preflight_elastic_info.json.version.number == elastic_version
+      - preflight_elastic_info.json.version.number is match('^9\\.')
+
+- name: Query Kibana over verified TLS
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/status"
+    headers:
+      Authorization: "ApiKey {{ kibana_api_key | b64encode }}"
+      kbn-xsrf: soc-lab-preflight
+    ca_path: "{{ elastic_ca_file_local }}"
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: preflight_kibana_status
+  no_log: true
+
+- name: Create local report directory
+  ansible.builtin.file:
+    path: artifacts
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+
+- name: Save sanitized preflight report locally
+  ansible.builtin.copy:
+    dest: artifacts/preflight.json
+    mode: '0600'
+    content: >-
+      {{ {'host': inventory_hostname,
+          'distribution': ansible_distribution ~ ' ' ~ ansible_distribution_version,
+          'vcpus': ansible_processor_vcpus,
+          'memory_mb': ansible_memtotal_mb,
+          'egress_ip': preflight_public_ip.content | trim,
+          'elasticsearch_version': preflight_elastic_info.json.version.number,
+          'kibana_status': preflight_kibana_status.json.status.overall.level | default('available'),
+          'libvirt_inventory': preflight_libvirt_inventory.stdout_lines,
+          'listening_sockets': preflight_listening_sockets.stdout_lines,
+          'nftables_readable': preflight_nft_ruleset.rc == 0} | to_nice_json }}
+  delegate_to: localhost

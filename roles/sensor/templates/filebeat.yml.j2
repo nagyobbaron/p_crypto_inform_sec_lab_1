@@ -1,0 +1,25 @@
+filebeat.config.modules:
+  path: /etc/filebeat/modules.d/*.yml
+  reload.enabled: false
+
+setup.ilm.enabled: true
+setup.template.enabled: true
+
+output.elasticsearch:
+  hosts: ["{{ elasticsearch_url }}"]
+  api_key: "${ES_API_KEY}"
+  pipeline: soc-lab-suricata
+  ssl.enabled: true
+  ssl.certificate_authorities: ["{{ elastic_ca_file_remote }}"]
+
+processors:
+  - add_fields:
+      target: observer
+      fields:
+        name: soc-sensor
+        type: ids
+        vendor: OISF
+        product: Suricata
+
+logging.level: info
+logging.to_files: true

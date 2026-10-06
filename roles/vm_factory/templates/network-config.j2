@@ -1,0 +1,33 @@
+version: 2
+ethernets:
+{% if item.name == 'soc-sensor' %}
+  socmgt:
+    match: {macaddress: "52:54:00:00:00:01"}
+    set-name: socmgt
+    dhcp4: true
+  socatt:
+    match: {macaddress: "52:54:00:10:00:01"}
+    set-name: socatt
+    addresses: [10.10.10.1/24]
+  soctgt:
+    match: {macaddress: "52:54:00:20:00:01"}
+    set-name: soctgt
+    addresses: [10.20.20.1/24]
+{% elif item.name == 'soc-target' %}
+  soctgt:
+    match: {macaddress: "52:54:00:20:00:20"}
+    set-name: soctgt
+    addresses: [10.20.20.20/24]
+    routes:
+      - {to: default, via: 10.20.20.1}
+    nameservers: {addresses: [1.1.1.1, 9.9.9.9]}
+{% else %}
+  socatt:
+    match: {macaddress: "52:54:00:10:00:10"}
+    set-name: socatt
+    addresses: [10.10.10.10/24]
+    routes:
+      - {to: default, via: 10.10.10.1}
+    nameservers: {addresses: [1.1.1.1, 9.9.9.9]}
+{% endif %}
+

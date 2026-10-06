@@ -1,0 +1,81 @@
+---
+- name: Load the stock Suricata ingest pipeline and index management
+  ansible.builtin.command:
+    argv:
+      - filebeat
+      - setup
+      - --pipelines
+      - --index-management
+      - --modules
+      - suricata
+      - -E
+      - "output.elasticsearch.api_key={{ elastic_setup_api_key }}"
+  changed_when: false
+  no_log: true
+
+- name: Install chained SOC lab ingest pipeline
+  ansible.builtin.uri:
+    url: "{{ elasticsearch_url }}/_ingest/pipeline/soc-lab-suricata"
+    method: PUT
+    headers:
+      Authorization: "ApiKey {{ elastic_setup_api_key | b64encode }}"
+      Content-Type: application/json
+    ca_path: "{{ elastic_ca_file_remote }}"
+    body_format: json
+    body:
+      description: Parse Suricata EVE and classify controlled weak-cipher traffic
+      processors:
+        - pipeline:
+            name: "filebeat-{{ elastic_version }}-suricata-eve-pipeline"
+        - set:
+            if: "ctx.destination != null && ctx.destination.port == 4436"
+            field: soc.tls.cipher_class
+            value: obsolete-cbc-sha1
+        - set:
+            if: "ctx.destination != null && ctx.destination.port == 4433"
+            field: soc.tls.protocol_class
+            value: obsolete
+      on_failure:
+        - set:
+            field: error.message
+            value: "{{ '{{' }} _ingest.on_failure_message {{ '}}' }}"
+    status_code: [200, 201]
+  no_log: true
+
+- name: Copy Kibana saved objects to the sensor
+  ansible.builtin.copy:
+    src: soc-dashboard.ndjson
+    dest: /var/lib/filebeat/soc-dashboard.ndjson
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Import the SOC lab dashboard into Kibana
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail-with-body
+      - --silent
+      - --show-error
+      - --cacert
+      - "{{ elastic_ca_file_remote }}"
+      - -H
+      - "Authorization: ApiKey {{ kibana_api_key | b64encode }}"
+      - -H
+      - "kbn-xsrf: soc-lab"
+      - -F
+      - "file=@/var/lib/filebeat/soc-dashboard.ndjson;type=application/ndjson"
+      - "{{ kibana_url }}/api/saved_objects/_import?overwrite=true"
+  changed_when: false
+  no_log: true
+
+- name: Ensure Filebeat is running after pipeline installation
+  ansible.builtin.systemd_service:
+    name: filebeat
+    enabled: true
+    state: started
+
+- name: Verify Filebeat can publish through the chained pipeline
+  ansible.builtin.command: filebeat test output -e
+  changed_when: false
+  no_log: true

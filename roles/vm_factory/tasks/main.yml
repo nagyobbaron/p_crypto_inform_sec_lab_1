@@ -1,0 +1,101 @@
+---
+- name: Download pinned Ubuntu cloud image
+  ansible.builtin.get_url:
+    url: "{{ ubuntu_image_url }}"
+    dest: "{{ soc_image_dir }}/ubuntu-noble.qcow2"
+    checksum: "sha256:{{ ubuntu_image_sha256 }}"
+    owner: libvirt-qemu
+    group: libvirt-qemu
+    mode: '0640'
+
+- name: Download pinned Kali cloud image
+  ansible.builtin.get_url:
+    url: "{{ kali_image_url }}"
+    dest: "{{ soc_image_dir }}/kali.qcow2"
+    checksum: "sha256:{{ kali_image_sha256 }}"
+    owner: libvirt-qemu
+    group: libvirt-qemu
+    mode: '0640'
+
+- name: Render cloud-init files
+  ansible.builtin.template:
+    src: "{{ cloud_file }}.j2"
+    dest: "{{ soc_seed_dir }}/{{ item.name }}-{{ cloud_file }}"
+    owner: libvirt-qemu
+    group: libvirt-qemu
+    mode: '0640'
+  loop: "{{ soc_vms }}"
+  loop_control:
+    label: "{{ item.name }} {{ cloud_file }}"
+  vars:
+    cloud_file: user-data
+
+- name: Render cloud-init network files
+  ansible.builtin.template:
+    src: network-config.j2
+    dest: "{{ soc_seed_dir }}/{{ item.name }}-network-config"
+    owner: libvirt-qemu
+    group: libvirt-qemu
+    mode: '0640'
+  loop: "{{ soc_vms }}"
+
+- name: Render cloud-init metadata
+  ansible.builtin.copy:
+    dest: "{{ soc_seed_dir }}/{{ item.name }}-meta-data"
+    owner: libvirt-qemu
+    group: libvirt-qemu
+    mode: '0640'
+    content: |
+      instance-id: {{ item.name }}-v1
+      local-hostname: {{ item.name }}
+  loop: "{{ soc_vms }}"
+
+- name: Create cloud-init seed images once
+  ansible.builtin.command:
+    cmd: >-
+      cloud-localds
+      --network-config={{ soc_seed_dir }}/{{ item.name }}-network-config
+      {{ soc_seed_dir }}/{{ item.name }}-seed.img
+      {{ soc_seed_dir }}/{{ item.name }}-user-data
+      {{ soc_seed_dir }}/{{ item.name }}-meta-data
+    creates: "{{ soc_seed_dir }}/{{ item.name }}-seed.img"
+  loop: "{{ soc_vms }}"
+
+- name: Create copy-on-write VM disks
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img create -f qcow2 -F qcow2
+      -b {{ soc_image_dir }}/{{ 'kali.qcow2' if item.base_image == 'kali' else 'ubuntu-noble.qcow2' }}
+      {{ soc_storage_pool }}/{{ item.name }}.qcow2 {{ item.disk_gb }}G
+    creates: "{{ soc_storage_pool }}/{{ item.name }}.qcow2"
+  loop: "{{ soc_vms }}"
+
+- name: Set VM image ownership
+  ansible.builtin.file:
+    path: "{{ soc_storage_pool }}/{{ item.name }}.qcow2"
+    owner: libvirt-qemu
+    group: libvirt-qemu
+    mode: '0640'
+  loop: "{{ soc_vms }}"
+
+- name: Read defined libvirt domains
+  community.libvirt.virt:
+    command: list_vms
+  register: vm_factory_existing_domains
+  changed_when: false
+
+- name: Define missing SOC VM domains
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('template', 'domain.xml.j2') }}"
+  vars:
+    vm: "{{ item }}"
+  loop: "{{ soc_vms }}"
+  when: item.name not in vm_factory_existing_domains.list_vms
+
+- name: Start and autostart SOC VMs
+  community.libvirt.virt:
+    name: "{{ item.name }}"
+    state: running
+    autostart: true
+  loop: "{{ soc_vms }}"

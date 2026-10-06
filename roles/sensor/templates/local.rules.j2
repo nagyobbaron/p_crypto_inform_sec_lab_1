@@ -1,0 +1,8 @@
+alert http 10.10.10.0/24 any -> 10.20.20.0/24 80 (msg:"SOC LAB SQL injection attempt"; flow:established,to_server; http.uri; content:"union"; nocase; content:"select"; nocase; classtype:web-application-attack; sid:1000001; rev:1;)
+alert http 10.10.10.0/24 any -> 10.20.20.0/24 80 (msg:"SOC LAB XSS attempt"; flow:established,to_server; http.uri; content:"<script"; nocase; classtype:web-application-attack; sid:1000002; rev:1;)
+alert tcp 10.10.10.0/24 any -> 10.20.20.0/24 9999 (msg:"SOC LAB oversized buffer attempt"; flow:established,to_server; content:"OVERFLOW_TEST:"; depth:14; dsize:>1024; classtype:attempted-admin; sid:1000003; rev:1;)
+alert tls 10.10.10.0/24 any -> 10.20.20.0/24 4433 (msg:"SOC LAB obsolete TLS version"; flow:established,to_server; ssl_version:tls1.0,tls1.1; classtype:protocol-command-decode; sid:1000004; rev:1;)
+alert tls 10.20.20.0/24 4434 -> 10.10.10.0/24 any (msg:"SOC LAB expired TLS certificate"; flow:established,to_client; tls_cert_expired; classtype:protocol-command-decode; sid:1000005; rev:1;)
+alert tls 10.20.20.0/24 4435 -> 10.10.10.0/24 any (msg:"SOC LAB rogue TLS certificate"; flow:established,to_client; tls.subject; content:"CN=rogue.soc.test"; nocase; classtype:protocol-command-decode; sid:1000006; rev:1;)
+alert http 10.20.20.0/24 8080 -> 10.10.10.0/24 any (msg:"SOC LAB known SHA256 artifact"; flow:established,to_client; filesha256:soc-lab-sha256.list; classtype:policy-violation; sid:1000007; rev:1;)
+

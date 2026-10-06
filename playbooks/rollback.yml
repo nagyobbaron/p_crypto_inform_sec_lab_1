@@ -1,0 +1,38 @@
+---
+- name: Remove only SOC lab libvirt resources
+  hosts: kvm_hosts
+  become: true
+  gather_facts: false
+  vars_prompt:
+    - name: confirm_rollback
+      prompt: "Type REMOVE-SOC-LAB to remove soc-* VMs and networks"
+      private: false
+  tasks:
+    - name: Require explicit rollback confirmation
+      ansible.builtin.assert:
+        that: confirm_rollback == 'REMOVE-SOC-LAB'
+        fail_msg: Rollback cancelled.
+    - name: Stop SOC lab domains if present
+      ansible.builtin.shell: |
+        if virsh dominfo {{ item.name }} >/dev/null 2>&1; then
+          virsh destroy {{ item.name }} >/dev/null 2>&1 || true
+          virsh undefine {{ item.name }} --nvram >/dev/null 2>&1 || virsh undefine {{ item.name }} >/dev/null 2>&1
+        fi
+      args:
+        executable: /bin/bash
+      loop: "{{ soc_vms }}"
+      changed_when: true
+    - name: Stop and undefine SOC networks
+      ansible.builtin.shell: |
+        if virsh net-info {{ item.value.name }} >/dev/null 2>&1; then
+          virsh net-destroy {{ item.value.name }} >/dev/null 2>&1 || true
+          virsh net-undefine {{ item.value.name }}
+        fi
+      args:
+        executable: /bin/bash
+      loop: "{{ soc_networks | dict2items }}"
+      changed_when: true
+    - name: Remove the dedicated SOC storage tree
+      ansible.builtin.file:
+        path: "{{ soc_storage_pool }}"
+        state: absent

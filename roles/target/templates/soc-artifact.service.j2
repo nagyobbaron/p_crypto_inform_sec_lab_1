@@ -1,0 +1,16 @@
+[Unit]
+Description=SOC lab known-hash artifact server
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 10.20.20.20 --directory /srv/soc-artifacts
+Restart=on-failure
+DynamicUser=true
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+
